@@ -1,6 +1,12 @@
 import db from "../../config/database";
-import { CreateSaleInput, UpdateSaleInput } from "../../types/sales/sale.type";
+import {
+    CreateSaleInput,
+    UpdateSaleInput,
+} from "../../types/sales/sale.type";
 
+/* ============================================================
+   HELPERS
+============================================================ */
 
 function calculateSaleTotals(
     items: {
@@ -14,7 +20,7 @@ function calculateSaleTotals(
         (sum, item) =>
             sum +
             item.quantity *
-            item.unit_price,
+                item.unit_price,
         0
     );
 
@@ -34,6 +40,194 @@ function calculateSaleTotals(
         totalAmount,
         balanceAmount,
     };
+}
+
+/**
+ * Only completed sales affect stock.
+ */
+function isSaleStockActive(
+    status: string | null | undefined
+) {
+    return (
+        String(status ?? "").toLowerCase() ===
+        "completed"
+    );
+}
+
+/**
+ * Keep stock values within products.current_stock
+ * precision of DECIMAL(12,3).
+ */
+function roundStock(value: number) {
+    return Number(value.toFixed(3));
+}
+
+/**
+ * Aggregate quantities by product.
+ *
+ * Example:
+ *
+ * product 5 +10
+ * product 5 +5
+ *
+ * becomes:
+ *
+ * product 5 +15
+ */
+function aggregateQuantities(
+    items: {
+        product_id: number;
+        quantity: number | string;
+    }[]
+) {
+    const quantities =
+        new Map<number, number>();
+
+    for (const item of items) {
+        const productId =
+            Number(item.product_id);
+
+        const quantity =
+            Number(item.quantity);
+
+        const current =
+            quantities.get(productId) ?? 0;
+
+        quantities.set(
+            productId,
+            roundStock(
+                current + quantity
+            )
+        );
+    }
+
+    return quantities;
+}
+
+/**
+ * Apply stock changes for a sale.
+ *
+ * Negative quantity = stock OUT
+ * Positive quantity = stock IN
+ *
+ * Example:
+ *
+ * Sale +5:
+ * quantity = -5
+ *
+ * Sale edited from 10 → 5:
+ * delta = +5
+ *
+ * Sale edited from 5 → 10:
+ * delta = -5
+ */
+async function applySaleStockChanges(
+    trx: any,
+    saleId: number,
+    quantities: Map<number, number>,
+    userId: number | undefined | null,
+    reason: string
+) {
+    for (const [
+        productId,
+        quantityChange,
+    ] of quantities.entries()) {
+
+        if (quantityChange === 0) {
+            continue;
+        }
+
+        /* ------------------------------------------
+           Lock product row
+        ------------------------------------------ */
+
+        const product =
+            await trx("products")
+                .where(
+                    "id",
+                    productId
+                )
+                .where(
+                    "is_active",
+                    true
+                )
+                .forUpdate()
+                .first();
+
+        if (!product) {
+            throw new Error(
+                `Product ${productId} not found`
+            );
+        }
+
+        const currentStock =
+            Number(
+                product.current_stock ?? 0
+            );
+
+        const newStock =
+            roundStock(
+                currentStock +
+                    quantityChange
+            );
+
+        /* ------------------------------------------
+           Prevent negative stock
+        ------------------------------------------ */
+
+        if (newStock < 0) {
+            throw new Error(
+                `Insufficient stock for product ${productId}. Available stock: ${currentStock}, required change: ${quantityChange}`
+            );
+        }
+
+        /* ------------------------------------------
+           Update current stock
+        ------------------------------------------ */
+
+        await trx("products")
+            .where(
+                "id",
+                productId
+            )
+            .update({
+                current_stock:
+                    String(newStock),
+
+                updated_at:
+                    trx.fn.now(),
+            });
+
+        /* ------------------------------------------
+           Create stock movement
+        ------------------------------------------ */
+
+        await trx("stock_movements")
+            .insert({
+                product_id:
+                    productId,
+
+                movement_type:
+                    "sale",
+
+                quantity:
+                    quantityChange,
+
+                stock_after:
+                    newStock,
+
+                sale_id:
+                    saleId,
+
+                purchase_id:
+                    null,
+
+                created_by:
+                    userId ?? null,
+
+                reason,
+            });
+    }
 }
 
 /* ============================================================
@@ -81,14 +275,16 @@ export async function createSale(
     userId?: number
 ) {
     return db.transaction(async (trx) => {
+
         /* ---------------- Duplicate Invoice ---------------- */
 
-        const existing = await trx("sales")
-            .where(
-                "invoice_number",
-                data.invoice_number
-            )
-            .first();
+        const existing =
+            await trx("sales")
+                .where(
+                    "invoice_number",
+                    data.invoice_number
+                )
+                .first();
 
         if (existing) {
             throw new Error(
@@ -99,7 +295,8 @@ export async function createSale(
         /* ---------------- Customer ---------------- */
 
         if (
-            data.customer_id !== undefined &&
+            data.customer_id !==
+                undefined &&
             data.customer_id !== null
         ) {
             const customer =
@@ -121,20 +318,32 @@ export async function createSale(
 
         const productIds =
             data.items.map(
-                (item) => item.product_id
+                (item) =>
+                    item.product_id
             );
+
+        const uniqueProductIds =
+            [...new Set(productIds)];
 
         const products =
             await trx("products")
                 .whereIn(
                     "id",
-                    productIds
+                    uniqueProductIds
                 )
-                .select("id");
+                .where(
+                    "is_active",
+                    true
+                )
+                .select(
+                    "id",
+                    "name",
+                    "current_stock"
+                );
 
         if (
             products.length !==
-            productIds.length
+            uniqueProductIds.length
         ) {
             throw new Error(
                 "One or more products not found"
@@ -144,10 +353,12 @@ export async function createSale(
         /* ---------------- Calculations ---------------- */
 
         const discountPercent =
-            data.discount_percent ?? 0;
+            data.discount_percent ??
+            0;
 
         const paidAmount =
-            data.paid_amount ?? 0;
+            data.paid_amount ??
+            0;
 
         const totals =
             calculateSaleTotals(
@@ -163,6 +374,61 @@ export async function createSale(
             throw new Error(
                 "Paid amount cannot exceed total amount"
             );
+        }
+
+        const saleStatus =
+            data.status ??
+            "completed";
+
+        /* =====================================================
+           STOCK CHECK
+        ===================================================== */
+
+        if (
+            isSaleStockActive(
+                saleStatus
+            )
+        ) {
+            const quantities =
+                aggregateQuantities(
+                    data.items
+                );
+
+            for (const [
+                productId,
+                quantity,
+            ] of quantities.entries()) {
+
+                const product =
+                    products.find(
+                        (item: any) =>
+                            Number(
+                                item.id
+                            ) ===
+                            productId
+                    );
+
+                if (!product) {
+                    throw new Error(
+                        `Product ${productId} not found`
+                    );
+                }
+
+                const currentStock =
+                    Number(
+                        product.current_stock ??
+                            0
+                    );
+
+                if (
+                    currentStock <
+                    quantity
+                ) {
+                    throw new Error(
+                        `Insufficient stock for product ${productId}. Available stock: ${currentStock}, required: ${quantity}`
+                    );
+                }
+            }
         }
 
         /* ---------------- Sale ---------------- */
@@ -203,8 +469,7 @@ export async function createSale(
                         totals.balanceAmount,
 
                     status:
-                        data.status ??
-                        "completed",
+                        saleStatus,
 
                     notes:
                         data.notes ?? null,
@@ -214,23 +479,69 @@ export async function createSale(
         /* ---------------- Sale Items ---------------- */
 
         await trx("sale_items").insert(
-            data.items.map((item) => ({
-                sale_id: sale.id,
+            data.items.map(
+                (item) => ({
+                    sale_id:
+                        sale.id,
 
-                product_id:
-                    item.product_id,
+                    product_id:
+                        item.product_id,
 
-                quantity:
-                    item.quantity,
+                    quantity:
+                        item.quantity,
 
-                unit_price:
-                    item.unit_price,
+                    unit_price:
+                        item.unit_price,
 
-                total_amount:
-                    item.quantity *
-                    item.unit_price,
-            }))
+                    total_amount:
+                        item.quantity *
+                        item.unit_price,
+                })
+            )
         );
+
+        /* =====================================================
+           STOCK OUT
+        ===================================================== */
+
+        if (
+            isSaleStockActive(
+                saleStatus
+            )
+        ) {
+            const quantities =
+                aggregateQuantities(
+                    data.items
+                );
+
+            /*
+             * Sale removes stock.
+             *
+             * Example:
+             * quantity = 5
+             * stock change = -5
+             */
+
+            for (const [
+                productId,
+                quantity,
+            ] of quantities.entries()) {
+                quantities.set(
+                    productId,
+                    -quantity
+                );
+            }
+
+            await applySaleStockChanges(
+                trx,
+                sale.id,
+                quantities,
+                userId,
+                `Sale ${sale.invoice_number}`
+            );
+        }
+
+        /* ---------------- Fetch Items ---------------- */
 
         const items =
             await trx("sale_items")
@@ -254,16 +565,17 @@ export async function createSale(
 export async function listSales(
     date?: string
 ) {
-    const query = db("sales as s")
-        .leftJoin(
-            "customers as c",
-            "s.customer_id",
-            "c.id"
-        )
-        .select(
-            "s.*",
-            "c.name as customer_name"
-        );
+    const query =
+        db("sales as s")
+            .leftJoin(
+                "customers as c",
+                "s.customer_id",
+                "c.id"
+            )
+            .select(
+                "s.*",
+                "c.name as customer_name"
+            );
 
     /* ---------------- Date Filter ---------------- */
 
@@ -339,12 +651,31 @@ export async function updateSale(
 
         const existing =
             await trx("sales")
-                .where("id", id)
+                .where(
+                    "id",
+                    id
+                )
                 .first();
 
         if (!existing) {
-            throw new Error("Sale not found");
+            throw new Error(
+                "Sale not found"
+            );
         }
+
+        /* ---------------- Existing Items ---------------- */
+
+        const oldItems =
+            await trx("sale_items")
+                .where(
+                    "sale_id",
+                    id
+                )
+                .select(
+                    "product_id",
+                    "quantity",
+                    "unit_price"
+                );
 
         /* ---------------- Duplicate Invoice ---------------- */
 
@@ -355,7 +686,10 @@ export async function updateSale(
                         "invoice_number",
                         data.invoice_number
                     )
-                    .whereNot("id", id)
+                    .whereNot(
+                        "id",
+                        id
+                    )
                     .first();
 
             if (duplicate) {
@@ -368,12 +702,16 @@ export async function updateSale(
         /* ---------------- Customer ---------------- */
 
         if (
-            data.customer_id !== undefined &&
+            data.customer_id !==
+                undefined &&
             data.customer_id !== null
         ) {
             const customer =
                 await trx("customers")
-                    .where("id", data.customer_id)
+                    .where(
+                        "id",
+                        data.customer_id
+                    )
                     .first();
 
             if (!customer) {
@@ -383,25 +721,46 @@ export async function updateSale(
             }
         }
 
+        /* ---------------- New Items ---------------- */
+
+        const newItems =
+            data.items ??
+            oldItems;
+
         /* ---------------- Products ---------------- */
 
         if (data.items) {
+
             const productIds =
                 data.items.map(
-                    (item) => item.product_id
+                    (item) =>
+                        item.product_id
                 );
+
+            const uniqueProductIds =
+                [
+                    ...new Set(
+                        productIds
+                    ),
+                ];
 
             const products =
                 await trx("products")
                     .whereIn(
                         "id",
-                        productIds
+                        uniqueProductIds
                     )
-                    .select("id");
+                    .where(
+                        "is_active",
+                        true
+                    )
+                    .select(
+                        "id"
+                    );
 
             if (
                 products.length !==
-                productIds.length
+                uniqueProductIds.length
             ) {
                 throw new Error(
                     "One or more products not found"
@@ -409,34 +768,27 @@ export async function updateSale(
             }
         }
 
-        /* ---------------- Existing Items ---------------- */
-
-        const items =
-            data.items ??
-            (await trx("sale_items")
-                .where("sale_id", id)
-                .select(
-                    "quantity",
-                    "unit_price"
-                ));
+        /* ---------------- Totals ---------------- */
 
         const discountPercent =
-            data.discount_percent !== undefined
+            data.discount_percent !==
+            undefined
                 ? data.discount_percent
                 : Number(
-                    existing.discount_percent
-                );
+                      existing.discount_percent
+                  );
 
         const paidAmount =
-            data.paid_amount !== undefined
+            data.paid_amount !==
+            undefined
                 ? data.paid_amount
                 : Number(
-                    existing.paid_amount
-                );
+                      existing.paid_amount
+                  );
 
         const totals =
             calculateSaleTotals(
-                items ?? [],
+                newItems,
                 discountPercent,
                 paidAmount
             );
@@ -450,17 +802,161 @@ export async function updateSale(
             );
         }
 
-        /* ---------------- Update Header ---------------- */
+        const newStatus =
+            data.status ??
+            existing.status;
+
+        /* =====================================================
+           CALCULATE STOCK DELTA
+        ===================================================== */
+
+        const oldStockActive =
+            isSaleStockActive(
+                existing.status
+            );
+
+        const newStockActive =
+            isSaleStockActive(
+                newStatus
+            );
+
+        const oldQuantities =
+            aggregateQuantities(
+                oldItems
+            );
+
+        const newQuantities =
+            aggregateQuantities(
+                newItems
+            );
+
+        const stockChanges =
+            new Map<number, number>();
+
+        const allProductIds =
+            new Set<number>([
+                ...oldQuantities.keys(),
+                ...newQuantities.keys(),
+            ]);
+
+        for (const productId of allProductIds) {
+
+            const oldQuantity =
+                oldStockActive
+                    ? (
+                          oldQuantities.get(
+                              productId
+                          ) ?? 0
+                      )
+                    : 0;
+
+            const newQuantity =
+                newStockActive
+                    ? (
+                          newQuantities.get(
+                              productId
+                          ) ?? 0
+                      )
+                    : 0;
+
+            /*
+             * Sale stock logic:
+             *
+             * Old sale 10
+             * New sale 15
+             *
+             * Delta = 15 - 10 = +5
+             * Stock must decrease by 5
+             *
+             * Therefore:
+             *
+             * stockChange = -(new - old)
+             */
+
+            const stockChange =
+                roundStock(
+                    -(
+                        newQuantity -
+                        oldQuantity
+                    )
+                );
+
+            if (
+                stockChange !== 0
+            ) {
+                stockChanges.set(
+                    productId,
+                    stockChange
+                );
+            }
+        }
+
+        /* =====================================================
+           CHECK STOCK BEFORE UPDATING
+        ===================================================== */
+
+        for (const [
+            productId,
+            stockChange,
+        ] of stockChanges.entries()) {
+
+            const product =
+                await trx("products")
+                    .where(
+                        "id",
+                        productId
+                    )
+                    .where(
+                        "is_active",
+                        true
+                    )
+                    .forUpdate()
+                    .first();
+
+            if (!product) {
+                throw new Error(
+                    `Product ${productId} not found`
+                );
+            }
+
+            const currentStock =
+                Number(
+                    product.current_stock ??
+                        0
+                );
+
+            const newStock =
+                roundStock(
+                    currentStock +
+                        stockChange
+                );
+
+            if (
+                newStock < 0
+            ) {
+                throw new Error(
+                    `Insufficient stock for product ${productId}. Available stock: ${currentStock}`
+                );
+            }
+        }
+
+        /* =====================================================
+           UPDATE SALE HEADER
+        ===================================================== */
 
         await trx("sales")
-            .where("id", id)
+            .where(
+                "id",
+                id
+            )
             .update({
                 invoice_number:
                     data.invoice_number ??
                     existing.invoice_number,
 
                 customer_id:
-                    data.customer_id !== undefined
+                    data.customer_id !==
+                    undefined
                         ? data.customer_id
                         : existing.customer_id,
 
@@ -491,11 +987,11 @@ export async function updateSale(
                     totals.balanceAmount,
 
                 status:
-                    data.status ??
-                    existing.status,
+                    newStatus,
 
                 notes:
-                    data.notes !== undefined
+                    data.notes !==
+                    undefined
                         ? data.notes
                         : existing.notes,
 
@@ -503,18 +999,25 @@ export async function updateSale(
                     trx.fn.now(),
             });
 
-        /* ---------------- Replace Items ---------------- */
+        /* =====================================================
+           REPLACE SALE ITEMS
+        ===================================================== */
 
         if (data.items) {
+
             await trx("sale_items")
-                .where("sale_id", id)
+                .where(
+                    "sale_id",
+                    id
+                )
                 .del();
 
             await trx("sale_items")
                 .insert(
                     data.items.map(
                         (item) => ({
-                            sale_id: id,
+                            sale_id:
+                                id,
 
                             product_id:
                                 item.product_id,
@@ -531,6 +1034,26 @@ export async function updateSale(
                         })
                     )
                 );
+        }
+
+        /* =====================================================
+           APPLY STOCK CHANGES
+        ===================================================== */
+
+        if (
+            stockChanges.size > 0
+        ) {
+
+            await applySaleStockChanges(
+                trx,
+                id,
+                stockChanges,
+                userId,
+                `Updated sale ${
+                    data.invoice_number ??
+                    existing.invoice_number
+                }`
+            );
         }
     });
 

@@ -6,7 +6,7 @@ import {
     ArrowLeft,
     Loader2,
     Save,
-    AlertCircle
+    AlertCircle,
 } from "lucide-react";
 
 
@@ -203,7 +203,7 @@ export default function EditExpensePage() {
 
             if (
                 formData.amount ===
-                undefined ||
+                    undefined ||
                 Number(formData.amount) <= 0
             ) {
                 setError(
@@ -569,10 +569,10 @@ export default function EditExpensePage() {
                                                             ""
                                                             ? null
                                                             : Number(
-                                                                event
-                                                                    .target
-                                                                    .value
-                                                            )
+                                                                  event
+                                                                      .target
+                                                                      .value
+                                                              )
                                                     )
                                                 }
                                                 placeholder="0.00"
@@ -723,10 +723,10 @@ export default function EditExpensePage() {
                                             <p className="font-medium text-slate-700">
                                                 {expense.created_at
                                                     ? new Date(
-                                                        expense.created_at
-                                                    ).toLocaleString(
-                                                        "en-IN"
-                                                    )
+                                                          expense.created_at
+                                                      ).toLocaleString(
+                                                          "en-IN"
+                                                      )
                                                     : "-"}
                                             </p>
                                         </div>

@@ -30,7 +30,11 @@ function calculatePurchaseTotals(
 
   return {
     subtotal: Number(subtotal.toFixed(2)),
-    totalAmount: Number(totalAmount.toFixed(2)),
+
+    totalAmount: Number(
+      totalAmount.toFixed(2)
+    ),
+
     balanceAmount: Number(
       balanceAmount.toFixed(2)
     ),
@@ -143,15 +147,18 @@ export async function createPurchase(
   userId: number | null
 ) {
   return db.transaction(async (trx) => {
-    // Check duplicate purchase number
-    const existingPurchase = await trx(
-      "purchases"
-    )
-      .where(
-        "purchase_number",
-        data.purchase_number
-      )
-      .first();
+
+    // ==========================================
+    // 1. CHECK DUPLICATE PURCHASE NUMBER
+    // ==========================================
+
+    const existingPurchase =
+      await trx("purchases")
+        .where(
+          "purchase_number",
+          data.purchase_number
+        )
+        .first();
 
     if (existingPurchase) {
       throw new Error(
@@ -159,12 +166,21 @@ export async function createPurchase(
       );
     }
 
-    // Check supplier if provided
-    if (data.supplier_id !== undefined &&
-        data.supplier_id !== null) {
-      const supplier = await trx("suppliers")
-        .where("id", data.supplier_id)
-        .first();
+    // ==========================================
+    // 2. CHECK SUPPLIER
+    // ==========================================
+
+    if (
+      data.supplier_id !== undefined &&
+      data.supplier_id !== null
+    ) {
+      const supplier =
+        await trx("suppliers")
+          .where(
+            "id",
+            data.supplier_id
+          )
+          .first();
 
       if (!supplier) {
         throw new Error(
@@ -173,11 +189,22 @@ export async function createPurchase(
       }
     }
 
-    // Check products
+    // ==========================================
+    // 3. CHECK PRODUCTS
+    // ==========================================
+
     for (const item of data.items) {
-      const product = await trx("products")
-        .where("id", item.product_id)
-        .first();
+      const product =
+        await trx("products")
+          .where(
+            "id",
+            item.product_id
+          )
+          .where(
+            "is_active",
+            true
+          )
+          .first();
 
       if (!product) {
         throw new Error(
@@ -185,6 +212,10 @@ export async function createPurchase(
         );
       }
     }
+
+    // ==========================================
+    // 4. CALCULATE TOTALS
+    // ==========================================
 
     const discountPercent =
       data.discount_percent ?? 0;
@@ -199,73 +230,88 @@ export async function createPurchase(
         paidAmount
       );
 
-    if (paidAmount > totals.totalAmount) {
+    if (
+      paidAmount >
+      totals.totalAmount
+    ) {
       throw new Error(
         "Paid amount cannot be greater than total amount"
       );
     }
 
-    const [purchase] = await trx("purchases")
-      .insert({
-        purchase_number:
-          data.purchase_number,
+    // ==========================================
+    // 5. CREATE PURCHASE
+    // ==========================================
 
-        supplier_id:
-          data.supplier_id ?? null,
+    const [purchase] =
+      await trx("purchases")
+        .insert({
+          purchase_number:
+            data.purchase_number,
 
-        created_by: userId,
+          supplier_id:
+            data.supplier_id ?? null,
 
-        updated_by: userId,
+          created_by:
+            userId,
 
-        purchase_date:
-          data.purchase_date,
+          updated_by:
+            userId,
 
-        payment_method:
-          data.payment_method ?? "cash",
+          purchase_date:
+            data.purchase_date,
 
-        subtotal:
-          totals.subtotal,
+          payment_method:
+            data.payment_method ?? "cash",
 
-        discount_percent:
-          discountPercent,
+          subtotal:
+            totals.subtotal,
 
-        total_amount:
-          totals.totalAmount,
+          discount_percent:
+            discountPercent,
 
-        paid_amount:
-          paidAmount,
+          total_amount:
+            totals.totalAmount,
 
-        balance_amount:
-          totals.balanceAmount,
+          paid_amount:
+            paidAmount,
 
-        status:
-          data.status ?? "completed",
+          balance_amount:
+            totals.balanceAmount,
 
-        notes:
-          data.notes ?? null,
-      })
-      .returning([
-        "id",
-        "purchase_number",
-        "supplier_id",
-        "created_by",
-        "updated_by",
-        "purchase_date",
-        "payment_method",
-        "subtotal",
-        "discount_percent",
-        "total_amount",
-        "paid_amount",
-        "balance_amount",
-        "status",
-        "notes",
-        "created_at",
-        "updated_at",
-      ]);
+          status:
+            data.status ?? "completed",
+
+          notes:
+            data.notes ?? null,
+        })
+        .returning([
+          "id",
+          "purchase_number",
+          "supplier_id",
+          "created_by",
+          "updated_by",
+          "purchase_date",
+          "payment_method",
+          "subtotal",
+          "discount_percent",
+          "total_amount",
+          "paid_amount",
+          "balance_amount",
+          "status",
+          "notes",
+          "created_at",
+          "updated_at",
+        ]);
+
+    // ==========================================
+    // 6. CREATE PURCHASE ITEMS
+    // ==========================================
 
     const purchaseItems = [];
 
     for (const item of data.items) {
+
       const itemTotal =
         item.quantity *
         item.unit_price;
@@ -303,6 +349,96 @@ export async function createPurchase(
       purchaseItems.push(
         purchaseItem
       );
+
+      // ==========================================
+      // 7. UPDATE STOCK
+      // ==========================================
+
+      /*
+       * Only completed purchases affect stock.
+       */
+
+      if (
+        (data.status ?? "completed") ===
+        "completed"
+      ) {
+        const product =
+          await trx("products")
+            .where(
+              "id",
+              item.product_id
+            )
+            .where(
+              "is_active",
+              true
+            )
+            .first();
+
+        if (!product) {
+          throw new Error(
+            `Product ${item.product_id} not found`
+          );
+        }
+
+        const currentStock =
+          Number(
+            product.current_stock || 0
+          );
+
+        const quantity =
+          Number(item.quantity);
+
+        const newStock =
+          currentStock + quantity;
+
+        // ------------------------------------------
+        // Update product current stock
+        // ------------------------------------------
+
+        await trx("products")
+          .where(
+            "id",
+            item.product_id
+          )
+          .update({
+            current_stock:
+              String(newStock),
+
+            updated_at:
+              trx.fn.now(),
+          });
+
+        // ------------------------------------------
+        // Create stock movement
+        // ------------------------------------------
+
+        await trx("stock_movements")
+          .insert({
+            product_id:
+              item.product_id,
+
+            movement_type:
+              "purchase",
+
+            quantity:
+              quantity,
+
+            stock_after:
+              newStock,
+
+            sale_id:
+              null,
+
+            purchase_id:
+              purchase.id,
+
+            created_by:
+              userId,
+
+            reason:
+              `Purchase ${purchase.purchase_number}`,
+          });
+      }
     }
 
     return {
@@ -322,9 +458,17 @@ export async function updatePurchase(
   userId: number | null
 ) {
   return db.transaction(async (trx) => {
+
+    // ==========================================
+    // 1. GET EXISTING PURCHASE
+    // ==========================================
+
     const existingPurchase =
       await trx("purchases")
-        .where("id", id)
+        .where(
+          "id",
+          id
+        )
         .first();
 
     if (!existingPurchase) {
@@ -333,15 +477,37 @@ export async function updatePurchase(
       );
     }
 
-    // Check duplicate purchase number
+    // ==========================================
+    // 2. GET OLD PURCHASE ITEMS
+    // ==========================================
+
+    const oldItems =
+      await trx("purchase_items")
+        .where(
+          "purchase_id",
+          id
+        )
+        .orderBy(
+          "id",
+          "asc"
+        );
+
+    // ==========================================
+    // 3. CHECK DUPLICATE PURCHASE NUMBER
+    // ==========================================
+
     if (data.purchase_number) {
+
       const duplicate =
         await trx("purchases")
           .where(
             "purchase_number",
             data.purchase_number
           )
-          .whereNot("id", id)
+          .whereNot(
+            "id",
+            id
+          )
           .first();
 
       if (duplicate) {
@@ -351,7 +517,10 @@ export async function updatePurchase(
       }
     }
 
-    // Supplier validation
+    // ==========================================
+    // 4. SUPPLIER VALIDATION
+    // ==========================================
+
     if (
       data.supplier_id !== undefined &&
       data.supplier_id !== null
@@ -371,7 +540,10 @@ export async function updatePurchase(
       }
     }
 
-    // Determine values
+    // ==========================================
+    // 5. DETERMINE VALUES
+    // ==========================================
+
     const discountPercent =
       data.discount_percent ??
       Number(
@@ -385,18 +557,33 @@ export async function updatePurchase(
       );
 
     let subtotal =
-      Number(existingPurchase.subtotal);
+      Number(
+        existingPurchase.subtotal
+      );
 
     let items = null;
 
-    // If items are provided, replace existing items
+    // ==========================================
+    // 6. HANDLE ITEMS
+    // ==========================================
+
     if (data.items) {
+
+      // ------------------------------------------
+      // Validate new products
+      // ------------------------------------------
+
       for (const item of data.items) {
+
         const product =
           await trx("products")
             .where(
               "id",
               item.product_id
+            )
+            .where(
+              "is_active",
+              true
             )
             .first();
 
@@ -407,6 +594,10 @@ export async function updatePurchase(
         }
       }
 
+      // ------------------------------------------
+      // Calculate new totals
+      // ------------------------------------------
+
       const totals =
         calculatePurchaseTotals(
           data.items,
@@ -414,7 +605,8 @@ export async function updatePurchase(
           paidAmount
         );
 
-      subtotal = totals.subtotal;
+      subtotal =
+        totals.subtotal;
 
       if (
         paidAmount >
@@ -425,6 +617,103 @@ export async function updatePurchase(
         );
       }
 
+      // ==========================================
+      // REVERSE OLD STOCK
+      // ==========================================
+
+      if (
+        existingPurchase.status ===
+        "completed"
+      ) {
+
+        for (const oldItem of oldItems) {
+
+          const oldQuantity =
+            Number(
+              oldItem.quantity
+            );
+
+          const product =
+            await trx("products")
+              .where(
+                "id",
+                oldItem.product_id
+              )
+              .where(
+                "is_active",
+                true
+              )
+              .first();
+
+          if (!product) {
+            throw new Error(
+              `Product ${oldItem.product_id} not found`
+            );
+          }
+
+          const currentStock =
+            Number(
+              product.current_stock || 0
+            );
+
+          const newStock =
+            currentStock -
+            oldQuantity;
+
+          if (newStock < 0) {
+            throw new Error(
+              `Cannot update purchase. Stock for product ${oldItem.product_id} would become negative.`
+            );
+          }
+
+          // Update product stock
+          await trx("products")
+            .where(
+              "id",
+              oldItem.product_id
+            )
+            .update({
+              current_stock:
+                String(newStock),
+
+              updated_at:
+                trx.fn.now(),
+            });
+
+          // Record reversal movement
+          await trx("stock_movements")
+            .insert({
+              product_id:
+                oldItem.product_id,
+
+              movement_type:
+                "adjustment",
+
+              quantity:
+                -oldQuantity,
+
+              stock_after:
+                newStock,
+
+              sale_id:
+                null,
+
+              purchase_id:
+                id,
+
+              created_by:
+                userId,
+
+              reason:
+                `Reversed old quantity from purchase ${existingPurchase.purchase_number}`,
+            });
+        }
+      }
+
+      // ==========================================
+      // DELETE OLD PURCHASE ITEMS
+      // ==========================================
+
       await trx("purchase_items")
         .where(
           "purchase_id",
@@ -432,9 +721,14 @@ export async function updatePurchase(
         )
         .delete();
 
+      // ==========================================
+      // INSERT NEW PURCHASE ITEMS
+      // ==========================================
+
       items = [];
 
       for (const item of data.items) {
+
         const itemTotal =
           item.quantity *
           item.unit_price;
@@ -444,13 +738,18 @@ export async function updatePurchase(
             "purchase_items"
           )
             .insert({
-              purchase_id: id,
+              purchase_id:
+                id,
+
               product_id:
                 item.product_id,
+
               quantity:
                 item.quantity,
+
               unit_price:
                 item.unit_price,
+
               total_amount:
                 Number(
                   itemTotal.toFixed(2)
@@ -470,13 +769,110 @@ export async function updatePurchase(
           purchaseItem
         );
       }
+
+      // ==========================================
+      // APPLY NEW STOCK
+      // ==========================================
+
+      if (
+        (
+          data.status ??
+          existingPurchase.status
+        ) === "completed"
+      ) {
+
+        for (const item of data.items) {
+
+          const product =
+            await trx("products")
+              .where(
+                "id",
+                item.product_id
+              )
+              .where(
+                "is_active",
+                true
+              )
+              .first();
+
+          if (!product) {
+            throw new Error(
+              `Product ${item.product_id} not found`
+            );
+          }
+
+          const currentStock =
+            Number(
+              product.current_stock || 0
+            );
+
+          const quantity =
+            Number(
+              item.quantity
+            );
+
+          const newStock =
+            currentStock +
+            quantity;
+
+          // Update stock
+          await trx("products")
+            .where(
+              "id",
+              item.product_id
+            )
+            .update({
+              current_stock:
+                String(newStock),
+
+              updated_at:
+                trx.fn.now(),
+            });
+
+          // Create purchase movement
+          await trx("stock_movements")
+            .insert({
+              product_id:
+                item.product_id,
+
+              movement_type:
+                "purchase",
+
+              quantity:
+                quantity,
+
+              stock_after:
+                newStock,
+
+              sale_id:
+                null,
+
+              purchase_id:
+                id,
+
+              created_by:
+                userId,
+
+              reason:
+                `Updated purchase ${existingPurchase.purchase_number}`,
+            });
+        }
+      }
+
     } else {
+
+      // ==========================================
+      // NO ITEM CHANGES
+      // ==========================================
+
       const totalAmount =
         Number(
           (
             subtotal -
-            (subtotal *
-              discountPercent) /
+            (
+              subtotal *
+              discountPercent
+            ) /
               100
           ).toFixed(2)
         );
@@ -491,12 +887,18 @@ export async function updatePurchase(
       }
     }
 
+    // ==========================================
+    // 7. FINAL TOTALS
+    // ==========================================
+
     const totalAmount =
       Number(
         (
           subtotal -
-          (subtotal *
-            discountPercent) /
+          (
+            subtotal *
+            discountPercent
+          ) /
             100
         ).toFixed(2)
       );
@@ -509,33 +911,41 @@ export async function updatePurchase(
         ).toFixed(2)
       );
 
+    // ==========================================
+    // 8. UPDATE PURCHASE
+    // ==========================================
+
     const [purchase] =
       await trx("purchases")
-        .where("id", id)
+        .where(
+          "id",
+          id
+        )
         .update({
+
           ...(data.purchase_number !==
-          undefined && {
-            purchase_number:
-              data.purchase_number,
-          }),
+            undefined && {
+              purchase_number:
+                data.purchase_number,
+            }),
 
           ...(data.supplier_id !==
-          undefined && {
-            supplier_id:
-              data.supplier_id,
-          }),
+            undefined && {
+              supplier_id:
+                data.supplier_id,
+            }),
 
           ...(data.purchase_date !==
-          undefined && {
-            purchase_date:
-              data.purchase_date,
-          }),
+            undefined && {
+              purchase_date:
+                data.purchase_date,
+            }),
 
           ...(data.payment_method !==
-          undefined && {
-            payment_method:
-              data.payment_method,
-          }),
+            undefined && {
+              payment_method:
+                data.payment_method,
+            }),
 
           subtotal,
 
@@ -552,18 +962,20 @@ export async function updatePurchase(
             balanceAmount,
 
           ...(data.status !==
-          undefined && {
-            status:
-              data.status,
-          }),
+            undefined && {
+              status:
+                data.status,
+            }),
 
           ...(data.notes !==
-          undefined && {
-            notes:
-              data.notes,
-          }),
+            undefined && {
+              notes:
+                data.notes,
+            }),
 
-          updated_by: userId,
+          updated_by:
+            userId,
+
           updated_at:
             trx.fn.now(),
         })
@@ -586,6 +998,10 @@ export async function updatePurchase(
           "updated_at",
         ]);
 
+    // ==========================================
+    // 9. GET FINAL ITEMS
+    // ==========================================
+
     if (!items) {
       items =
         await trx("purchase_items")
@@ -593,7 +1009,10 @@ export async function updatePurchase(
             "purchase_id",
             id
           )
-          .orderBy("id", "asc");
+          .orderBy(
+            "id",
+            "asc"
+          );
     }
 
     return {
@@ -603,23 +1022,40 @@ export async function updatePurchase(
   });
 }
 
+/* ==========================================
+   NEXT PURCHASE NUMBER
+========================================== */
+
 export async function getNextPurchaseNumber(): Promise<string> {
-  const lastPurchase = await db("purchases")
-    .select("purchase_number")
-    .orderBy("id", "desc")
-    .first();
+
+  const lastPurchase =
+    await db("purchases")
+      .select(
+        "purchase_number"
+      )
+      .orderBy(
+        "id",
+        "desc"
+      )
+      .first();
 
   if (!lastPurchase) {
     return "PUR00001";
   }
 
-  const match = lastPurchase.purchase_number.match(/^PUR(\d+)$/);
+  const match =
+    lastPurchase.purchase_number.match(
+      /^PUR(\d+)$/
+    );
 
   if (!match) {
     return "PUR00001";
   }
 
-  const nextNumber = Number(match[1]) + 1;
+  const nextNumber =
+    Number(match[1]) + 1;
 
-  return `PUR${String(nextNumber).padStart(5, "0")}`;
+  return `PUR${String(
+    nextNumber
+  ).padStart(5, "0")}`;
 }

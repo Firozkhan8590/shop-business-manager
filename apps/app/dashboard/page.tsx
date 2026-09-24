@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
+
 import {
   Bell,
   ChevronDown,
@@ -13,6 +15,7 @@ import {
   AlertTriangle,
   ArrowDownRight,
   ArrowUpRight,
+  RefreshCw,
 } from "lucide-react";
 
 import {
@@ -29,139 +32,241 @@ import {
 } from "recharts";
 
 import Sidebar from "../components/Sidebar";
+import { DashboardData, getDashboard, RecentPurchase, RecentSale } from "@/src/lib/dashboard";
+
+
 
 /* -------------------------------------------------------------------------- */
-/* STATIC DATA                                                                */
+/* HELPERS                                                                    */
 /* -------------------------------------------------------------------------- */
 
-const salesPurchaseData = [
-  { day: "Mon", sales: 18500, purchases: 9200 },
-  { day: "Tue", sales: 22400, purchases: 11800 },
-  { day: "Wed", sales: 19800, purchases: 7600 },
-  { day: "Thu", sales: 27600, purchases: 14200 },
-  { day: "Fri", sales: 24900, purchases: 10800 },
-  { day: "Sat", sales: 32100, purchases: 16400 },
-  { day: "Sun", sales: 28500, purchases: 12100 },
-];
+const formatCurrency = (value: number) => {
+  return `₹${Number(value || 0).toLocaleString("en-IN", {
+    maximumFractionDigits: 2,
+  })}`;
+};
 
-const profitData = [
-  { day: "Mon", profit: 7200 },
-  { day: "Tue", profit: 8600 },
-  { day: "Wed", profit: 9100 },
-  { day: "Thu", profit: 11200 },
-  { day: "Fri", profit: 10400 },
-  { day: "Sat", profit: 13800 },
-  { day: "Sun", profit: 12100 },
-];
+const formatChartDay = (dateString: string) => {
+  const date = new Date(`${dateString}T00:00:00`);
 
-const topProducts = [
-  {
-    name: "Plastic Storage Box",
-    category: "Storage",
-    quantity: 86,
-    amount: "₹12,040",
-  },
-  {
-    name: "Kitchen Container Set",
-    category: "Kitchen",
-    quantity: 72,
-    amount: "₹9,360",
-  },
-  {
-    name: "Plastic Bucket",
-    category: "Household",
-    quantity: 64,
-    amount: "₹7,680",
-  },
-  {
-    name: "Water Bottle",
-    category: "Kitchen",
-    quantity: 51,
-    amount: "₹5,610",
-  },
-  {
-    name: "Plastic Mug",
-    category: "Household",
-    quantity: 44,
-    amount: "₹3,520",
-  },
-];
+  return date.toLocaleDateString("en-IN", {
+    weekday: "short",
+  });
+};
 
-const lowStockItems = [
-  {
-    name: "Plastic Mug",
-    stock: 4,
-    minimum: 20,
-    unit: "pcs",
-  },
-  {
-    name: "Storage Basket",
-    stock: 7,
-    minimum: 25,
-    unit: "pcs",
-  },
-  {
-    name: "Water Bottle",
-    stock: 9,
-    minimum: 30,
-    unit: "pcs",
-  },
-  {
-    name: "Kitchen Tray",
-    stock: 12,
-    minimum: 20,
-    unit: "pcs",
-  },
-];
+const formatDateTime = (dateString: string) => {
+  if (!dateString) return "-";
 
-const recentTransactions = [
-  {
-    type: "Sale",
-    number: "INV-2026-0148",
-    party: "Walk-in Customer",
-    amount: "₹2,450",
-    method: "Cash",
-    time: "10:42 AM",
-  },
-  {
-    type: "Sale",
-    number: "INV-2026-0147",
-    party: "Ameen Stores",
-    amount: "₹5,840",
-    method: "Credit",
-    time: "10:15 AM",
-  },
-  {
-    type: "Purchase",
-    number: "PUR-2026-0084",
-    party: "KPL Plastics",
-    amount: "₹12,400",
-    method: "Credit",
-    time: "09:48 AM",
-  },
-  {
-    type: "Expense",
-    number: "EXP-2026-0032",
-    party: "Shop Electricity",
-    amount: "₹2,850",
-    method: "Bank",
-    time: "Yesterday",
-  },
-  {
-    type: "Sale",
-    number: "INV-2026-0146",
-    party: "Nissar Traders",
-    amount: "₹8,250",
-    method: "UPI",
-    time: "Yesterday",
-  },
-];
+  const date = new Date(`${dateString}T00:00:00`);
+
+  return date.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+  });
+};
 
 /* -------------------------------------------------------------------------- */
 /* PAGE                                                                       */
 /* -------------------------------------------------------------------------- */
 
 export default function DashboardPage() {
+  const [dashboard, setDashboard] =
+    useState<DashboardData | null>(null);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [error, setError] =
+    useState<string | null>(null);
+
+  /* ------------------------------------------------------------------------ */
+  /* FETCH DASHBOARD                                                          */
+  /* ------------------------------------------------------------------------ */
+
+  const loadDashboard = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const data = await getDashboard();
+
+      setDashboard(data);
+    } catch (err) {
+      console.error(
+        "Dashboard fetch error:",
+        err
+      );
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to load dashboard"
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDashboard();
+  }, []);
+
+  /* ------------------------------------------------------------------------ */
+  /* LOADING                                                                   */
+  /* ------------------------------------------------------------------------ */
+
+  if (loading && !dashboard) {
+    return (
+      <div className="min-h-screen bg-[#f5f7f7] text-slate-900">
+        <Sidebar />
+
+        <div className="lg:pl-[260px]">
+          <div className="flex min-h-screen items-center justify-center">
+            <div className="flex flex-col items-center gap-3">
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-[#087f70]" />
+
+              <p className="text-sm text-slate-500">
+                Loading dashboard...
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* ERROR                                                                     */
+  /* ------------------------------------------------------------------------ */
+
+  if (error && !dashboard) {
+    return (
+      <div className="min-h-screen bg-[#f5f7f7] text-slate-900">
+        <Sidebar />
+
+        <div className="lg:pl-[260px]">
+          <div className="flex min-h-screen items-center justify-center px-5">
+            <div className="w-full max-w-md rounded-xl border border-red-100 bg-white p-6 text-center shadow-sm">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-50">
+                <AlertTriangle className="h-6 w-6 text-red-500" />
+              </div>
+
+              <h2 className="mt-4 text-lg font-semibold text-slate-900">
+                Unable to load dashboard
+              </h2>
+
+              <p className="mt-2 text-sm text-slate-500">
+                {error}
+              </p>
+
+              <button
+                onClick={loadDashboard}
+                className="mt-5 inline-flex h-10 items-center gap-2 rounded-lg bg-[#087f70] px-4 text-sm font-semibold text-white transition hover:bg-[#066e61]"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Try Again
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!dashboard) {
+    return null;
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* DATA                                                                      */
+  /* ------------------------------------------------------------------------ */
+
+  const {
+    summary,
+    salesPurchases,
+    profitOverview,
+    outstanding,
+    stockAlerts,
+    recentTransactions,
+  } = dashboard;
+
+  /* ------------------------------------------------------------------------ */
+  /* CHART DATA                                                                */
+  /* ------------------------------------------------------------------------ */
+
+  const salesPurchaseChartData =
+    salesPurchases.map((item) => ({
+      day: formatChartDay(item.date),
+      date: item.date,
+      sales: Number(item.sales || 0),
+      purchases: Number(item.purchases || 0),
+    }));
+
+  const profitChartData =
+    profitOverview.map((item) => ({
+      day: formatChartDay(item.date),
+      date: item.date,
+      profit: Number(item.profit || 0),
+    }));
+
+  /* ------------------------------------------------------------------------ */
+  /* WEEKLY PROFIT                                                             */
+  /* ------------------------------------------------------------------------ */
+
+  const weeklyProfit = profitOverview.reduce(
+    (total, item) =>
+      total + Number(item.profit || 0),
+    0
+  );
+
+  /* ------------------------------------------------------------------------ */
+  /* RECENT TRANSACTIONS                                                       */
+  /* ------------------------------------------------------------------------ */
+
+  const sales = (
+  recentTransactions?.sales || []
+).map((sale: RecentSale) => ({
+  type: "Sale",
+  number: sale.invoice_number,
+  party:
+    sale.customer_name ||
+    "Walk-in Customer",
+  amount: Number(sale.total_amount || 0),
+  method: sale.payment_method || "-",
+  date: sale.sale_date,
+  sortDate: sale.sale_date,
+}));
+
+const purchases = (
+  recentTransactions?.purchases || []
+).map(
+  (purchase: RecentPurchase) => ({
+    type: "Purchase",
+    number: purchase.purchase_number,
+    party:
+      purchase.supplier_name ||
+      "Unknown Supplier",
+    amount: Number(
+      purchase.total_amount || 0
+    ),
+    method:
+      purchase.payment_method || "-",
+    date: purchase.purchase_date,
+    sortDate: purchase.purchase_date,
+  })
+);
+
+const transactions = [...sales, ...purchases]
+  .sort(
+    (a, b) =>
+      new Date(b.sortDate).getTime() -
+      new Date(a.sortDate).getTime()
+  )
+  .slice(0, 5);
+  /* ------------------------------------------------------------------------ */
+  /* PAGE                                                                      */
+  /* ------------------------------------------------------------------------ */
+
   return (
     <div className="min-h-screen bg-[#f5f7f7] text-slate-900">
 
@@ -204,13 +309,32 @@ export default function DashboardPage() {
 
           <div className="flex items-center gap-3">
 
+            {/* Refresh */}
+
+            <button
+              onClick={loadDashboard}
+              disabled={loading}
+              className="rounded-lg p-2.5 text-slate-500 transition hover:bg-slate-100 disabled:opacity-50"
+              title="Refresh dashboard"
+            >
+              <RefreshCw
+                className={`h-[18px] w-[18px] ${
+                  loading
+                    ? "animate-spin"
+                    : ""
+                }`}
+              />
+            </button>
+
             {/* Notification */}
 
             <button className="relative rounded-lg p-2.5 text-slate-500 hover:bg-slate-100">
 
               <Bell className="h-[19px] w-[19px]" />
 
-              <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-red-500" />
+              {stockAlerts.length > 0 && (
+                <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-red-500" />
+              )}
 
             </button>
 
@@ -292,38 +416,54 @@ export default function DashboardPage() {
 
             <StatCard
               title="Today's Sales"
-              value="₹28,450"
-              change="+12.5%"
+              value={formatCurrency(
+                summary.todaySales
+              )}
+              change={`${summary.salesChange >= 0 ? "+" : ""}${summary.salesChange}%`}
               description="vs yesterday"
               icon={CircleDollarSign}
-              positive
+              positive={
+                summary.salesChange >= 0
+              }
             />
 
             <StatCard
               title="Today's Purchases"
-              value="₹12,840"
-              change="+5.8%"
+              value={formatCurrency(
+                summary.todayPurchases
+              )}
+              change={`${summary.purchasesChange >= 0 ? "+" : ""}${summary.purchasesChange}%`}
               description="vs yesterday"
               icon={ShoppingCart}
-              positive
+              positive={
+                summary.purchasesChange >= 0
+              }
             />
 
             <StatCard
               title="Today's Expenses"
-              value="₹3,250"
-              change="-8.2%"
+              value={formatCurrency(
+                summary.todayExpenses
+              )}
+              change={`${summary.expensesChange >= 0 ? "+" : ""}${summary.expensesChange}%`}
               description="vs yesterday"
               icon={Wallet}
-              positive
+              positive={
+                summary.expensesChange <= 0
+              }
             />
 
             <StatCard
               title="Today's Profit"
-              value="₹12,360"
-              change="+18.4%"
+              value={formatCurrency(
+                summary.todayProfit
+              )}
+              change={`${summary.profitChange >= 0 ? "+" : ""}${summary.profitChange}%`}
               description="vs yesterday"
               icon={TrendingUp}
-              positive
+              positive={
+                summary.profitChange >= 0
+              }
             />
 
           </div>
@@ -360,10 +500,15 @@ export default function DashboardPage() {
 
               <div className="h-[300px] w-full">
 
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer
+                  width="100%"
+                  height="100%"
+                >
 
                   <BarChart
-                    data={salesPurchaseData}
+                    data={
+                      salesPurchaseChartData
+                    }
                     margin={{
                       top: 5,
                       right: 5,
@@ -394,20 +539,42 @@ export default function DashboardPage() {
                         fontSize: 10,
                       }}
                       tickFormatter={(value) =>
-                        `₹${value / 1000}k`
+                        `₹${Number(
+                          value / 1000
+                        ).toFixed(0)}k`
                       }
                     />
 
                     <Tooltip
-                      formatter={(value, name) => [
-                        `₹${Number(value).toLocaleString("en-IN")}`,
+                      labelFormatter={(
+                        label,
+                        payload
+                      ) => {
+                        const item =
+                          payload?.[0]
+                            ?.payload;
+
+                        return item?.date
+                          ? formatDateTime(
+                              item.date
+                            )
+                          : label;
+                      }}
+                      formatter={(
+                        value,
+                        name
+                      ) => [
+                        formatCurrency(
+                          Number(value)
+                        ),
                         name === "sales"
                           ? "Sales"
                           : "Purchases",
                       ]}
                       contentStyle={{
                         borderRadius: "8px",
-                        border: "1px solid #e2e8f0",
+                        border:
+                          "1px solid #e2e8f0",
                         boxShadow:
                           "0 8px 30px rgba(15,23,42,0.08)",
                         fontSize: "12px",
@@ -433,7 +600,12 @@ export default function DashboardPage() {
                       dataKey="sales"
                       name="sales"
                       fill="#087f70"
-                      radius={[4, 4, 0, 0]}
+                      radius={[
+                        4,
+                        4,
+                        0,
+                        0,
+                      ]}
                       maxBarSize={26}
                     />
 
@@ -441,7 +613,12 @@ export default function DashboardPage() {
                       dataKey="purchases"
                       name="purchases"
                       fill="#94a3b8"
-                      radius={[4, 4, 0, 0]}
+                      radius={[
+                        4,
+                        4,
+                        0,
+                        0,
+                      ]}
                       maxBarSize={26}
                     />
 
@@ -480,21 +657,26 @@ export default function DashboardPage() {
               <div className="mb-3">
 
                 <p className="text-2xl font-bold text-slate-900">
-                  ₹72,400
+                  {formatCurrency(
+                    weeklyProfit
+                  )}
                 </p>
 
-                <p className="mt-1 text-xs font-medium text-emerald-600">
-                  +14.8% this week
+                <p className="mt-1 text-xs font-medium text-slate-400">
+                  Total profit for the last 7 days
                 </p>
 
               </div>
 
               <div className="h-[190px]">
 
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer
+                  width="100%"
+                  height="100%"
+                >
 
                   <LineChart
-                    data={profitData}
+                    data={profitChartData}
                     margin={{
                       top: 10,
                       right: 5,
@@ -524,18 +706,37 @@ export default function DashboardPage() {
                         fontSize: 9,
                       }}
                       tickFormatter={(value) =>
-                        `₹${value / 1000}k`
+                        `₹${Number(
+                          value / 1000
+                        ).toFixed(0)}k`
                       }
                     />
 
                     <Tooltip
+                      labelFormatter={(
+                        label,
+                        payload
+                      ) => {
+                        const item =
+                          payload?.[0]
+                            ?.payload;
+
+                        return item?.date
+                          ? formatDateTime(
+                              item.date
+                            )
+                          : label;
+                      }}
                       formatter={(value) => [
-                        `₹${Number(value).toLocaleString("en-IN")}`,
+                        formatCurrency(
+                          Number(value)
+                        ),
                         "Profit",
                       ]}
                       contentStyle={{
                         borderRadius: "8px",
-                        border: "1px solid #e2e8f0",
+                        border:
+                          "1px solid #e2e8f0",
                         fontSize: "11px",
                       }}
                     />
@@ -571,7 +772,7 @@ export default function DashboardPage() {
 
           <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-2">
 
-            {/* TOP PRODUCTS */}
+            {/* OUTSTANDING */}
 
             <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
 
@@ -580,65 +781,70 @@ export default function DashboardPage() {
                 <div>
 
                   <h2 className="text-[15px] font-semibold text-slate-900">
-                    Top Selling Products
+                    Outstanding
                   </h2>
 
                   <p className="mt-1 text-xs text-slate-400">
-                    Best performing products this week
+                    Current receivables and payables
                   </p>
 
                 </div>
 
-                <button className="text-xs font-semibold text-[#087f70] hover:underline">
-                  View all
-                </button>
-
               </div>
 
-              <div className="divide-y divide-slate-100">
+              <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2">
 
-                {topProducts.map((product, index) => (
+                <div className="rounded-xl bg-emerald-50 p-5">
 
-                  <div
-                    key={product.name}
-                    className="flex items-center gap-4 px-5 py-3.5"
-                  >
+                  <div className="flex items-center gap-2">
 
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-bold text-slate-500">
-                      {String(index + 1).padStart(2, "0")}
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white">
+                      <ArrowDownRight className="h-4 w-4 text-emerald-600" />
                     </div>
 
-                    <div className="min-w-0 flex-1">
-
-                      <p className="truncate text-sm font-medium text-slate-800">
-                        {product.name}
-                      </p>
-
-                      <p className="mt-0.5 text-[11px] text-slate-400">
-                        {product.category}
-                      </p>
-
-                    </div>
-
-                    <div className="hidden text-right sm:block">
-
-                      <p className="text-xs font-semibold text-slate-700">
-                        {product.quantity} sold
-                      </p>
-
-                    </div>
-
-                    <div className="w-[75px] text-right">
-
-                      <p className="text-sm font-semibold text-slate-800">
-                        {product.amount}
-                      </p>
-
-                    </div>
+                    <p className="text-xs font-medium text-emerald-700">
+                      Customer Outstanding
+                    </p>
 
                   </div>
 
-                ))}
+                  <p className="mt-4 text-2xl font-bold text-slate-900">
+                    {formatCurrency(
+                      outstanding.customerOutstanding
+                    )}
+                  </p>
+
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Amount receivable
+                  </p>
+
+                </div>
+
+                <div className="rounded-xl bg-blue-50 p-5">
+
+                  <div className="flex items-center gap-2">
+
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white">
+                      <ArrowUpRight className="h-4 w-4 text-blue-600" />
+                    </div>
+
+                    <p className="text-xs font-medium text-blue-700">
+                      Supplier Outstanding
+                    </p>
+
+                  </div>
+
+                  <p className="mt-4 text-2xl font-bold text-slate-900">
+                    {formatCurrency(
+                      outstanding.supplierOutstanding
+                    )}
+                  </p>
+
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Amount payable
+                  </p>
+
+                </div>
 
               </div>
 
@@ -659,7 +865,7 @@ export default function DashboardPage() {
                     </h2>
 
                     <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-600">
-                      {lowStockItems.length}
+                      {stockAlerts.length}
                     </span>
 
                   </div>
@@ -678,58 +884,90 @@ export default function DashboardPage() {
 
               <div className="divide-y divide-slate-100">
 
-                {lowStockItems.map((item) => {
+                {stockAlerts.length === 0 ? (
+                  <div className="px-5 py-8 text-center">
+                    <p className="text-sm font-medium text-slate-600">
+                      No low stock items
+                    </p>
 
-                  const percentage = Math.min(
-                    (item.stock / item.minimum) * 100,
-                    100
-                  );
+                    <p className="mt-1 text-xs text-slate-400">
+                      Your inventory levels look good.
+                    </p>
+                  </div>
+                ) : (
+                  stockAlerts
+                    .slice(0, 5)
+                    .map((item) => {
 
-                  return (
-                    <div
-                      key={item.name}
-                      className="flex items-center gap-4 px-5 py-3.5"
-                    >
+                      const percentage =
+                        item.minimum_stock > 0
+                          ? Math.min(
+                              (Number(
+                                item.current_stock
+                              ) /
+                                Number(
+                                  item.minimum_stock
+                                )) *
+                                100,
+                              100
+                            )
+                          : 0;
 
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-50">
-                        <AlertTriangle className="h-4 w-4 text-red-500" />
-                      </div>
+                      return (
+                        <div
+                          key={item.id}
+                          className="flex items-center gap-4 px-5 py-3.5"
+                        >
 
-                      <div className="min-w-0 flex-1">
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-50">
+                            <AlertTriangle className="h-4 w-4 text-red-500" />
+                          </div>
 
-                        <p className="truncate text-sm font-medium text-slate-800">
-                          {item.name}
-                        </p>
+                          <div className="min-w-0 flex-1">
 
-                        <div className="mt-2 h-1.5 w-full max-w-[180px] overflow-hidden rounded-full bg-slate-100">
+                            <p className="truncate text-sm font-medium text-slate-800">
+                              {item.name}
+                            </p>
 
-                          <div
-                            className="h-full rounded-full bg-red-400"
-                            style={{
-                              width: `${percentage}%`,
-                            }}
-                          />
+                            {item.sku && (
+                              <p className="mt-0.5 text-[10px] text-slate-400">
+                                SKU: {item.sku}
+                              </p>
+                            )}
+
+                            <div className="mt-2 h-1.5 w-full max-w-[180px] overflow-hidden rounded-full bg-slate-100">
+
+                              <div
+                                className="h-full rounded-full bg-red-400"
+                                style={{
+                                  width: `${percentage}%`,
+                                }}
+                              />
+
+                            </div>
+
+                          </div>
+
+                          <div className="text-right">
+
+                            <p className="text-sm font-bold text-red-600">
+                              {item.current_stock}
+                            </p>
+
+                            <p className="text-[10px] text-slate-400">
+                              min{" "}
+                              {
+                                item.minimum_stock
+                              }{" "}
+                              {item.unit}
+                            </p>
+
+                          </div>
 
                         </div>
-
-                      </div>
-
-                      <div className="text-right">
-
-                        <p className="text-sm font-bold text-red-600">
-                          {item.stock}
-                        </p>
-
-                        <p className="text-[10px] text-slate-400">
-                          min {item.minimum} {item.unit}
-                        </p>
-
-                      </div>
-
-                    </div>
-                  );
-
-                })}
+                      );
+                    })
+                )}
 
               </div>
 
@@ -752,7 +990,7 @@ export default function DashboardPage() {
                 </h2>
 
                 <p className="mt-1 text-xs text-slate-400">
-                  Latest sales, purchases and expenses
+                  Latest sales and purchases
                 </p>
 
               </div>
@@ -794,7 +1032,7 @@ export default function DashboardPage() {
                     </th>
 
                     <th className="px-5 py-3 text-right text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      Time
+                      Date
                     </th>
 
                   </tr>
@@ -803,44 +1041,71 @@ export default function DashboardPage() {
 
                 <tbody className="divide-y divide-slate-100">
 
-                  {recentTransactions.map((transaction) => (
-
-                    <tr
-                      key={transaction.number}
-                      className="transition hover:bg-slate-50"
-                    >
-
-                      <td className="px-5 py-3.5">
-                        <TransactionType type={transaction.type} />
+                  {transactions.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={6}
+                        className="px-5 py-10 text-center text-sm text-slate-400"
+                      >
+                        No recent transactions
                       </td>
-
-                      <td className="px-5 py-3.5 text-sm font-medium text-slate-700">
-                        {transaction.number}
-                      </td>
-
-                      <td className="px-5 py-3.5 text-sm text-slate-600">
-                        {transaction.party}
-                      </td>
-
-                      <td className="px-5 py-3.5">
-
-                        <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-500">
-                          {transaction.method}
-                        </span>
-
-                      </td>
-
-                      <td className="px-5 py-3.5 text-right text-sm font-semibold text-slate-800">
-                        {transaction.amount}
-                      </td>
-
-                      <td className="px-5 py-3.5 text-right text-xs text-slate-400">
-                        {transaction.time}
-                      </td>
-
                     </tr>
+                  ) : (
+                    transactions.map(
+                      (transaction) => (
 
-                  ))}
+                        <tr
+                          key={`${transaction.type}-${transaction.number}`}
+                          className="transition hover:bg-slate-50"
+                        >
+
+                          <td className="px-5 py-3.5">
+                            <TransactionType
+                              type={
+                                transaction.type
+                              }
+                            />
+                          </td>
+
+                          <td className="px-5 py-3.5 text-sm font-medium text-slate-700">
+                            {
+                              transaction.number
+                            }
+                          </td>
+
+                          <td className="px-5 py-3.5 text-sm text-slate-600">
+                            {
+                              transaction.party
+                            }
+                          </td>
+
+                          <td className="px-5 py-3.5">
+
+                            <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-500">
+                              {
+                                transaction.method
+                              }
+                            </span>
+
+                          </td>
+
+                          <td className="px-5 py-3.5 text-right text-sm font-semibold text-slate-800">
+                            {formatCurrency(
+                              transaction.amount
+                            )}
+                          </td>
+
+                          <td className="px-5 py-3.5 text-right text-xs text-slate-400">
+                            {formatDateTime(
+                              transaction.date
+                            )}
+                          </td>
+
+                        </tr>
+
+                      )
+                    )
+                  )}
 
                 </tbody>
 
@@ -852,42 +1117,62 @@ export default function DashboardPage() {
 
             <div className="divide-y divide-slate-100 md:hidden">
 
-              {recentTransactions.map((transaction) => (
-
-                <div
-                  key={transaction.number}
-                  className="flex items-center gap-3 px-5 py-4"
-                >
-
-                  <TransactionType type={transaction.type} />
-
-                  <div className="min-w-0 flex-1">
-
-                    <p className="truncate text-sm font-medium text-slate-700">
-                      {transaction.party}
-                    </p>
-
-                    <p className="mt-0.5 text-[11px] text-slate-400">
-                      {transaction.number}
-                    </p>
-
-                  </div>
-
-                  <div className="text-right">
-
-                    <p className="text-sm font-semibold text-slate-800">
-                      {transaction.amount}
-                    </p>
-
-                    <p className="mt-0.5 text-[10px] text-slate-400">
-                      {transaction.time}
-                    </p>
-
-                  </div>
-
+              {transactions.length === 0 ? (
+                <div className="px-5 py-8 text-center text-sm text-slate-400">
+                  No recent transactions
                 </div>
+              ) : (
+                transactions.map(
+                  (transaction) => (
 
-              ))}
+                    <div
+                      key={`${transaction.type}-${transaction.number}`}
+                      className="flex items-center gap-3 px-5 py-4"
+                    >
+
+                      <TransactionType
+                        type={
+                          transaction.type
+                        }
+                      />
+
+                      <div className="min-w-0 flex-1">
+
+                        <p className="truncate text-sm font-medium text-slate-700">
+                          {
+                            transaction.party
+                          }
+                        </p>
+
+                        <p className="mt-0.5 text-[11px] text-slate-400">
+                          {
+                            transaction.number
+                          }
+                        </p>
+
+                      </div>
+
+                      <div className="text-right">
+
+                        <p className="text-sm font-semibold text-slate-800">
+                          {formatCurrency(
+                            transaction.amount
+                          )}
+                        </p>
+
+                        <p className="mt-0.5 text-[10px] text-slate-400">
+                          {formatDateTime(
+                            transaction.date
+                          )}
+                        </p>
+
+                      </div>
+
+                    </div>
+
+                  )
+                )
+              )}
 
             </div>
 
@@ -1002,20 +1287,27 @@ function TransactionType({
   const config = {
     Sale: {
       icon: ArrowUpRight,
-      className: "bg-emerald-50 text-emerald-600",
+      className:
+        "bg-emerald-50 text-emerald-600",
     },
+
     Purchase: {
       icon: ArrowDownRight,
-      className: "bg-blue-50 text-blue-600",
+      className:
+        "bg-blue-50 text-blue-600",
     },
+
     Expense: {
       icon: Wallet,
-      className: "bg-orange-50 text-orange-600",
+      className:
+        "bg-orange-50 text-orange-600",
     },
   };
 
   const current =
-    config[type as keyof typeof config] || config.Sale;
+    config[
+      type as keyof typeof config
+    ] || config.Sale;
 
   const Icon = current.icon;
 

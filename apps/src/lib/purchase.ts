@@ -250,21 +250,29 @@ export async function updatePurchase(
 }
 
 export async function getNextPurchaseNumber(): Promise<string> {
-  const response = await fetch(
-    `${API_URL}/api/purchases/next-number`,
-    {
-      method: "GET",
-      headers: getAuthHeaders(),
-    }
-  );
-
-  const result = await response.json();
-
-  if (!response.ok || !result.success) {
-    throw new Error(
-      result.message || "Failed to generate purchase number"
+    const response = await fetch(
+        `${API_URL}/api/purchases/next-number`,
+        {
+            method: "GET",
+            headers: {
+                ...getAuthHeaders(),
+            },
+            cache: "no-store",
+        }
     );
-  }
 
-  return result.data.purchase_number;
+    const result = await response.json();
+
+    if (
+        !response.ok ||
+        !result.success ||
+        !result.data?.purchase_number
+    ) {
+        throw new Error(
+            result.message ||
+            "Failed to generate purchase number"
+        );
+    }
+
+    return result.data.purchase_number;
 }
