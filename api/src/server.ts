@@ -13,6 +13,7 @@ import expenseRoutes from "./routes/expenses/expense.route";
 import inventoryRoutes from "./routes/inventory/inventory.route";
 import estimateRoutes from "./routes/estimates/estimate.route";
 import dashboardRoutes from "./routes/dashboard/dashboard.route";
+import reportRoutes from "./routes/reports/report.route";
 
 const app = express();
 
@@ -39,6 +40,7 @@ app.use("/api/expenses", expenseRoutes);
 app.use("/api/inventory", inventoryRoutes);
 app.use("/api/estimates", estimateRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/reports", reportRoutes);
 
 app.listen(PORT, () => {
   console.log(

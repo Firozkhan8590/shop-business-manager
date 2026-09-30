@@ -93,18 +93,18 @@ export interface DashboardResponse {
 
 export const getDashboard = async (): Promise<DashboardData> => {
     const response = await fetch(
-        `${API_BASE_URL}/dashboard`,
+        `${API_BASE_URL}/dashboard?_=${Date.now()}`,
         {
             method: "GET",
             headers: {
                 "Content-Type": "application/json",
             },
+            cache: "no-store",
         }
     );
 
     if (!response.ok) {
-        let errorMessage =
-            "Failed to fetch dashboard data";
+        let errorMessage = "Failed to fetch dashboard data";
 
         try {
             const errorData = await response.json();
@@ -119,13 +119,11 @@ export const getDashboard = async (): Promise<DashboardData> => {
         throw new Error(errorMessage);
     }
 
-    const result: DashboardResponse =
-        await response.json();
+    const result: DashboardResponse = await response.json();
 
     if (!result.success) {
         throw new Error(
-            result.message ||
-                "Failed to fetch dashboard data"
+            result.message || "Failed to fetch dashboard data"
         );
     }
 

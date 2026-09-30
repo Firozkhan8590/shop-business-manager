@@ -1019,154 +1019,221 @@ export default function NewSalePage() {
      GLOBAL KEYBOARD SHORTCUTS
 ============================================================ */
 
-  useEffect(() => {
-    const handler = (
-      event: KeyboardEvent
-    ) => {
-      /* F4 - Customer */
+ /* ============================================================
+   GLOBAL KEYBOARD SHORTCUTS
+============================================================ */
 
-      if (event.key === "F4") {
-        event.preventDefault();
+useEffect(() => {
+  const handler = (event: KeyboardEvent) => {
+    const key = event.key;
+    const code = event.code;
 
-        setShowProductSearch(false);
+    /* ========================================================
+       F4 - CUSTOMER
+    ======================================================== */
 
+    if (key === "F4" || code === "F4") {
+      event.preventDefault();
+      event.stopPropagation();
+
+      setShowProductSearch(false);
+      setShowCustomerSearch(true);
+
+      setTimeout(() => {
         customerInputRef.current?.focus();
+        customerInputRef.current?.select();
+      }, 0);
 
-        return;
-      }
+      return;
+    }
 
-      /* F7 - Product */
+    /* ========================================================
+       F7 - PRODUCT
+    ======================================================== */
 
-      if (event.key === "F7") {
-        event.preventDefault();
+    if (key === "F7" || code === "F7") {
+      event.preventDefault();
+      event.stopPropagation();
 
-        setShowCustomerSearch(false);
+      setShowCustomerSearch(false);
+      setShowProductSearch(true);
 
-        productInputRefs.current[
-          0
-        ]?.focus();
+      const rowIndex =
+        activeProductRow !== null
+          ? activeProductRow
+          : 0;
 
-        return;
-      }
+      setActiveProductRow(rowIndex);
 
-      /* F8 - SAVE & PRINT */
-
-      if (event.key === "F8") {
-        event.preventDefault();
-
-        handleSaveAndPrint();
-
-        return;
-      }
-
-      /* F9 - SAVE */
-
-      if (event.key === "F9") {
-        event.preventDefault();
-
-        handleSave();
-
-        return;
-      }
-
-      /* Ctrl + P
-         Do not print directly from the create page.
-         Save & Print is handled by F8 / button. */
-
-      if (
-        event.ctrlKey &&
-        event.key.toLowerCase() ===
-        "p"
-      ) {
-        event.preventDefault();
-
-        handleSaveAndPrint();
-
-        return;
-      }
-
-      /* Ctrl + S - Save */
-
-      if (
-        event.ctrlKey &&
-        event.key.toLowerCase() ===
-        "s"
-      ) {
-        event.preventDefault();
-
-        handleSave();
-
-        return;
-      }
-
-      /* Ctrl + A - Add Line */
-
-      if (
-        event.ctrlKey &&
-        event.key.toLowerCase() ===
-        "a"
-      ) {
-        event.preventDefault();
-
-        addLine();
-
-        return;
-      }
-
-      /* Ctrl + D - Delete Line */
-
-      if (
-        event.ctrlKey &&
-        event.key.toLowerCase() ===
-        "d"
-      ) {
-        event.preventDefault();
-
-        if (
-          activeProductRow !== null
-        ) {
-          deleteLine(
-            activeProductRow
-          );
-        }
-
-        return;
-      }
-
-      /* Escape */
-
-      if (
-        event.key === "Escape" &&
-        !showProductSearch &&
-        !showCustomerSearch
-      ) {
-        event.preventDefault();
-
-        router.push("/sales");
-      }
-    };
-
-    window.addEventListener(
-      "keydown",
-      handler
-    );
-
-    return () => {
-      window.removeEventListener(
-        "keydown",
-        handler
+      setProductSearch(
+        rows[rowIndex]?.product_name || ""
       );
-    };
-  }, [
-    activeProductRow,
-    showProductSearch,
-    showCustomerSearch,
-    rows,
-    totalAmount,
-    paidAmount,
-    discountPercent,
-    customerId,
-  ]);
+
+      setHighlightedProduct(0);
+
+      setTimeout(() => {
+        productInputRefs.current[rowIndex]?.focus();
+        productInputRefs.current[rowIndex]?.select();
+      }, 0);
+
+      return;
+    }
+
+    /* ========================================================
+       F8 - SAVE & PRINT
+    ======================================================== */
+
+    if (key === "F8" || code === "F8") {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (!loading && !loadingData) {
+        void handleSaveAndPrint();
+      }
+
+      return;
+    }
+
+    /* ========================================================
+       F9 - SAVE
+    ======================================================== */
+
+    if (key === "F9" || code === "F9") {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (!loading && !loadingData) {
+        void handleSave();
+      }
+
+      return;
+    }
+
+    /* ========================================================
+       CTRL + P - SAVE & PRINT
+    ======================================================== */
+
+    if (
+      event.ctrlKey &&
+      key.toLowerCase() === "p"
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (!loading && !loadingData) {
+        void handleSaveAndPrint();
+      }
+
+      return;
+    }
+
+    /* ========================================================
+       CTRL + S - SAVE
+    ======================================================== */
+
+    if (
+      event.ctrlKey &&
+      key.toLowerCase() === "s"
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (!loading && !loadingData) {
+        void handleSave();
+      }
+
+      return;
+    }
+
+    /* ========================================================
+       CTRL + A - ADD LINE
+    ======================================================== */
+
+    if (
+      event.ctrlKey &&
+      key.toLowerCase() === "a"
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      addLine();
+
+      return;
+    }
+
+    /* ========================================================
+       CTRL + D - DELETE CURRENT LINE
+    ======================================================== */
+
+    if (
+      event.ctrlKey &&
+      key.toLowerCase() === "d"
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (activeProductRow !== null) {
+        deleteLine(activeProductRow);
+      }
+
+      return;
+    }
+
+    /* ========================================================
+       ESC - CANCEL
+    ======================================================== */
+
+    if (key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (showProductSearch) {
+        setShowProductSearch(false);
+        setActiveProductRow(null);
+        setProductSearch("");
+        return;
+      }
+
+      if (showCustomerSearch) {
+        setShowCustomerSearch(false);
+        return;
+      }
+
+      router.push("/sales");
+
+      return;
+    }
+  };
+
+  /*
+   * Capture phase makes the shortcut listener receive
+   * keyboard events before normal bubbling handlers.
+   */
+  window.addEventListener("keydown", handler, true);
+
+  return () => {
+    window.removeEventListener(
+      "keydown",
+      handler,
+      true
+    );
+  };
+}, [
+  activeProductRow,
+  showProductSearch,
+  showCustomerSearch,
+  rows,
+  loading,
+  loadingData,
+  invoiceNumber,
+  saleDate,
+  customerId,
+  paymentMethod,
+  discountPercent,
+  paidAmount,
+  notes,
+  totalAmount,
+]);
 
   /* ============================================================
      SELECTED PRODUCT

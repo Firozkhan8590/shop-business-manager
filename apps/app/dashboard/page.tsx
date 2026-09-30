@@ -33,6 +33,7 @@ import {
 
 import Sidebar from "../components/Sidebar";
 import { DashboardData, getDashboard, RecentPurchase, RecentSale } from "@/src/lib/dashboard";
+import { useRouter } from "next/navigation";
 
 
 
@@ -106,6 +107,8 @@ export default function DashboardPage() {
       setLoading(false);
     }
   };
+
+  const router = useRouter();
 
   useEffect(() => {
     loadDashboard();
@@ -399,7 +402,10 @@ const transactions = [...sales, ...purchases]
                 <ChevronDown className="h-4 w-4" />
               </button>
 
-              <button className="flex h-10 items-center gap-2 rounded-lg bg-[#087f70] px-4 text-sm font-semibold text-white shadow-sm hover:bg-[#066e61]">
+              <button
+                onClick={() => router.push("/sales/new")}
+                className="flex h-10 items-center gap-2 rounded-lg bg-[#087f70] px-4 text-sm font-semibold text-white shadow-sm hover:bg-[#066e61]"
+              >
                 <Receipt className="h-4 w-4" />
                 New Sale
               </button>
